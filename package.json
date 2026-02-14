@@ -20,7 +20,9 @@
     "@docusaurus/theme-mermaid": "^3.4.0",
     "@mdx-js/react": "^3.0.1",
     "@scalar/docusaurus": "^0.7.26",
+    "axios": "^1.13.5",
     "clsx": "^1.2.1",
+    "glob": "^13.0.3",
     "prism-react-renderer": "^2.3.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
@@ -46,5 +48,13 @@
   },
   "engines": {
     "node": ">=18.0"
-  }
+  },
+  "description": "Qubic's Docs are built using [Docusaurus 3](https://docusaurus.io/) with `pnpm`.",
+  "main": "babel.config.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
 }
