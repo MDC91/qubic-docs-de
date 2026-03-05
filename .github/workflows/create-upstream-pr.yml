@@ -4,176 +4,121 @@ on:
   pull_request:
     types: [closed]
     branches: [main]
-  workflow_dispatch:  # Manuelles Triggern möglich
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
 
 jobs:
   create-upstream-pr:
     if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.merged == true && contains(github.event.pull_request.title, '[REVIEW NEEDED]'))
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
 
     steps:
-      - name: Checkout your fork
+      - name: Checkout fork repository
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.actor }}/qubic-docs-de
-          token: ${{ secrets.UPSTREAM_PR_TOKEN }}
           fetch-depth: 0
+          token: ${{ secrets.UPSTREAM_PR_TOKEN }}
+          persist-credentials: true
 
       - name: Configure Git
         run: |
           git config user.name "Qubic Translation Bot"
           git config user.email "translation-bot@qubic-network.de"
 
-      - name: Find changed translation files
-        id: changed-files
+      - name: Add and fetch remotes
         run: |
-          # Bei manuellem Start: Alle aktuellen i18n Dateien verwenden
-          # Bei automatischem Start: Vergleiche mit letztem erfolgreichen Upstream-PR
-          
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            # Manueller Start - nimm alle aktuellen Dateien
-            echo "Manueller Start - verwende alle aktuellen Übersetzungsdateien"
-            CHANGED_FILES=$(git ls-files i18n/de/)
+          git remote add upstream https://github.com/qubic/docs.git || git remote set-url upstream https://github.com/qubic/docs.git
+          git fetch upstream main
+          git fetch origin main
+
+      - name: Build translation-only branch
+        id: prepare
+        run: |
+          BRANCH_NAME="german-translations-${{ github.run_id }}-${{ github.run_attempt }}"
+
+          rm -rf /tmp/fork-i18n-de
+          mkdir -p /tmp/fork-i18n-de
+
+          # Backup translations from fork main
+          git checkout --force origin/main
+          if [ -d i18n/de ]; then
+            cp -R i18n/de /tmp/fork-i18n-de/
           else
-            # Automatischer Start nach Merge - finde letzten Upstream-PR-Commit
-            # Suche nach Commits die "Add/Update German translations" enthalten
-            LAST_UPSTREAM_COMMIT=$(git log --grep="Add/Update German translations" --format="%H" -n 1 || echo "")
-            
-            if [ -z "$LAST_UPSTREAM_COMMIT" ]; then
-              echo "Kein vorheriger Upstream-PR gefunden, verwende alle Dateien"
-              CHANGED_FILES=$(git ls-files i18n/de/)
-            else
-              echo "Letzter Upstream-PR Commit: $LAST_UPSTREAM_COMMIT"
-              CHANGED_FILES=$(git diff --name-only $LAST_UPSTREAM_COMMIT HEAD -- i18n/de/)
-            fi
+            echo "No i18n/de directory found in origin/main"
           fi
-          
-          if [ -z "$CHANGED_FILES" ]; then
-            echo "Keine neuen Übersetzungen gefunden"
-            echo "has_changes=false" >> $GITHUB_OUTPUT
+
+          # Start from upstream main, then copy only i18n/de
+          git checkout --force -B "$BRANCH_NAME" upstream/main
+          if [ ! -d /tmp/fork-i18n-de/de ]; then
+            echo "::error title=Missing translations::No i18n/de directory found in origin/main."
+            exit 1
+          fi
+
+          rm -rf i18n/de
+          mkdir -p i18n
+          cp -R /tmp/fork-i18n-de/de i18n/
+
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "No translation changes to send upstream"
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          
-          echo "Geänderte Dateien:"
-          echo "$CHANGED_FILES"
-          
-          # Speichere für später
-          echo "$CHANGED_FILES" > /tmp/changed_files.txt
-          echo "has_changes=true" >> $GITHUB_OUTPUT
 
-      - name: Create clean branch with translations
-        if: steps.changed-files.outputs.has_changes == 'true'
-        run: |
-          # Neuen Branch erstellen (von main aus)
-          BRANCH_NAME="german-translations-$(date +%Y%m%d)"
-          git checkout -b $BRANCH_NAME
-          
-          # Sichere die gewünschten Dateien
-          mkdir -p /tmp/translations-backup
-          while IFS= read -r file; do
-            if [ -f "$file" ]; then
-              mkdir -p "/tmp/translations-backup/$(dirname $file)"
-              cp "$file" "/tmp/translations-backup/$file"
-              echo "Backed up: $file"
-            fi
-          done < /tmp/changed_files.txt
-          
-          # Alles löschen außer .git
-          find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
-          
-          # Dateien wiederherstellen
-          cp -r /tmp/translations-backup/* .
-          
-          # Alles stagen
-          git add -A
-          
-          # Status anzeigen
-          echo "Git Status nach Wiederherstellung:"
-          git status
-          
-          # Commit erstellen
           git commit -m "Add/Update German translations
-          
-          - Translated via DeepSeek API with human review
-          - Covers latest documentation updates
-          - All technical terms preserved
-          - Only translation files included
-          
-          Co-authored-by: ${{ github.actor }}"
-          
-          # Branch pushen (force, falls er schon existiert)
-          git push -f origin $BRANCH_NAME
-          
-          echo "branch_name=$BRANCH_NAME" >> $GITHUB_ENV
-          echo "✓ Branch $BRANCH_NAME erstellt und gepusht"
+
+          - Synced from ${{ github.repository }} after review
+          - Includes only i18n/de content"
+
+          git push -u origin "$BRANCH_NAME"
+
+          echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          echo "branch_name=$BRANCH_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Create Pull Request to qubic/docs
-        if: steps.changed-files.outputs.has_changes == 'true'
+        if: steps.prepare.outputs.has_changes == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.UPSTREAM_PR_TOKEN }}
         run: |
-          # Cross-Repository PR erstellen
           gh pr create \
             --repo qubic/docs \
-            --title "German Translation Update - $(date +%Y-%m-%d)" \
+            --title "German Translation Update - $(date -u +%Y-%m-%d)" \
             --body "$(cat << 'PRBODY'
-          ## 🇩🇪 German Translation Update
-          
-          This PR adds German translations for the Qubic documentation.
-          
-          ### What's included:
-          - ✅ Latest translations synchronized with upstream
-          - ✅ AI-translated via DeepSeek API
-          - ✅ Reviewed by human translator
-          - ✅ All technical terms preserved
-          - ✅ Proper Docusaurus i18n structure (`i18n/de/`)
-          
-          ### Files changed:
-          - German translations in `i18n/de/docusaurus-plugin-content-docs/current/`
-          
-          ### How to test:
-          1. Pull this branch
-          2. Add to `docusaurus.config.js`:
-             ```javascript
-             i18n: {
-               defaultLocale: 'en',
-               locales: ['en', 'de'],
-             }
-             ```
-          3. Run `npm run start`
-          4. Visit `http://localhost:3000/de/`
-          
-          ### Requirements for merge:
-          - [ ] Add `de` to `locales` in `docusaurus.config.js`
-          - [ ] Verify build succeeds: `npm run build`
-          - [ ] Check German pages render correctly
-          
-          ### Maintenance:
-          - Translations are automatically synced daily
-          - New PRs will be created for future updates
-          - This is a one-time setup - future updates just need merge
-          
+          ## German Translation Update
+
+          This PR adds or updates German documentation translations.
+
+          ### Included
+          - Synced from `${{ github.repository }}`
+          - Human-reviewed before upstream submission
+          - Translation files only (`i18n/de/**`)
+          - Scope currently limited to `overview` documents
+
+          ### Notes
+          - This workflow creates a clean branch from `qubic/docs:main`
+          - It then copies only `i18n/de` from the fork
+          - No workflow, script, or source files are included
+
           ---
-          *Automated translation workflow by @${{ github.actor }}*  
-          *For questions about translations, please contact the German translation team*
+          Automated by translation sync workflow.
           PRBODY
           )" \
-            --head ${{ github.actor }}:${{ env.branch_name }} \
+            --head "${{ github.repository_owner }}:${{ steps.prepare.outputs.branch_name }}" \
             --base main
 
+      - name: Notify no changes
+        if: steps.prepare.outputs.has_changes != 'true'
+        run: |
+          echo "::notice title=No Changes::No new translation changes found for upstream PR."
+
       - name: Notify success
+        if: steps.prepare.outputs.has_changes == 'true'
         run: |
           echo "========================================"
-          echo "✅ PR erfolgreich erstellt!"
-          echo ""
-          echo "Der Qubic-Maintainer bekommt jetzt:"
-          echo "- Nur den i18n/de/ Ordner"
-          echo "- Keine Workflow-Dateien"
-          echo "- Keine Scripts"
-          echo ""
-          echo "Link zum PR:"
-          echo "https://github.com/qubic/docs/pulls"
+          echo "Upstream PR created successfully"
+          echo "Includes only: i18n/de/**"
           echo "========================================"

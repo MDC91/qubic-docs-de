@@ -5,6 +5,9 @@ on:
     types: [closed]
     branches: [main]
 
+permissions:
+  contents: write
+
 jobs:
   cleanup:
     runs-on: ubuntu-latest
@@ -13,15 +16,18 @@ jobs:
     steps:
       - name: Delete merged branch
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           BRANCH_NAME="${{ github.event.pull_request.head.ref }}"
-          
-          # Nur translation-sync Branches löschen
+
+          # Delete only translation-sync branches
           if [[ $BRANCH_NAME == translation-sync-* ]]; then
-            echo "Lösche Branch: $BRANCH_NAME"
-            git push origin --delete $BRANCH_NAME || echo "Branch konnte nicht gelöscht werden (möglicherweise schon gelöscht)"
-            echo "✓ Branch $BRANCH_NAME wurde gelöscht"
+            echo "Deleting branch: $BRANCH_NAME"
+            if gh api -X DELETE "repos/${{ github.repository }}/git/refs/heads/$BRANCH_NAME"; then
+              echo "Deleted branch: $BRANCH_NAME"
+            else
+              echo "Branch could not be deleted (maybe already deleted)"
+            fi
           else
-            echo "Branch $BRANCH_NAME ist kein Translation-Branch, überspringe"
+            echo "Branch $BRANCH_NAME is not a translation branch, skipping"
           fi

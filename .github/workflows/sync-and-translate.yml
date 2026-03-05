@@ -1,11 +1,10 @@
 name: Sync and Translate Qubic Docs
 
 on:
-  # DEAKTIVIERT bis das Qubic-Team die Übersetzungen akzeptiert
-  # schedule:
-  #   # Täglich um 02:00 UTC (außerhalb der Hauptnutzungszeiten)
-  #   - cron: '0 2 * * *'
-  workflow_dispatch:  # Nur manuelles Triggern möglich
+  # Täglich um 02:00 UTC
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
 
 env:
   UPSTREAM_REPO: qubic/docs
@@ -317,15 +316,15 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           branch: translation-sync-${{ github.run_id }}
           base: main
-          title: "[REVIEW NEEDED] Translation Sync - $(date +%Y-%m-%d)"
+          title: "[REVIEW NEEDED] Translation Sync #${{ github.run_number }}"
           body: |
             ## Übersetzungssync erstellt
             
-            **Datum:** $(date +%Y-%m-%d)
+            **Run:** #${{ github.run_number }}
             **Quelle:** qubic/docs
             
             ### Änderungen:
-            Übersetzte Dateien im Overview-Ordner
+            Übersetzte Dateien im `docs/overview`-Ordner
             
             ### Nächste Schritte:
             1. [ ] Review der Übersetzungen durchführen
@@ -334,7 +333,7 @@ jobs:
             
             **Wichtig:** Bitte innerhalb von 48h reviewn.
           commit-message: | 
-            Translation sync: $(date +%Y-%m-%d)
+            Translation sync run #${{ github.run_number }}
             
             Automated translation of changed documentation files.
             Review required before creating upstream PR.
